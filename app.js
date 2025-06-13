@@ -70,7 +70,7 @@ class PatientManager {
         });
         
         // Filtri e ricerca
-        document.getElementById('sortBy').addEventListener('change', () => this.renderPatients());
+        document.getElementById('sortByRoomBtn').addEventListener('click', () => this.sortByRoom());
         document.getElementById('filterPriority').addEventListener('change', () => this.renderPatients());
         document.getElementById('searchInput').addEventListener('input', () => this.renderPatients());
         
@@ -207,9 +207,12 @@ class PatientManager {
         return Date.now().toString() + Math.random().toString(36).substr(2, 5);
     }
 
-    renderPatients() {
+    sortByRoom() {
+        this.renderPatients(true);
+    }
+
+    renderPatients(sortByRoom = false) {
         const container = document.getElementById('patientsContainer');
-        const sortBy = document.getElementById('sortBy').value;
         const filterPriority = document.getElementById('filterPriority').value;
         const searchTerm = document.getElementById('searchInput').value.toLowerCase();
 
@@ -222,20 +225,29 @@ class PatientManager {
             return matchesSearch && matchesPriority;
         });
 
-        // Ordina pazienti
-        filteredPatients.sort((a, b) => {
-            if (sortBy === 'room') {
+        // Ordina pazienti per numero di letto se richiesto
+        if (sortByRoom) {
+            filteredPatients.sort((a, b) => {
                 const roomA = a.room || '';
                 const roomB = b.room || '';
+                
+                // Estrae i numeri dai nomi delle stanze per un ordinamento numerico intelligente
+                const getNumericValue = (room) => {
+                    const match = room.match(/\d+/);
+                    return match ? parseInt(match[0]) : 999999;
+                };
+                
+                const numA = getNumericValue(roomA);
+                const numB = getNumericValue(roomB);
+                
+                if (numA !== numB) {
+                    return numA - numB;
+                }
+                
+                // Se i numeri sono uguali, ordina alfabeticamente
                 return roomA.localeCompare(roomB);
-            } else if (sortBy === 'priority') {
-                const priorityOrder = { 'alert': 1, 'dimissione': 2, 'trasferimento': 3, 'gestione': 4 };
-                const priorityA = priorityOrder[a.priority] || 999;
-                const priorityB = priorityOrder[b.priority] || 999;
-                return priorityA - priorityB;
-            }
-            return 0;
-        });
+            });
+        }
 
         // Renderizza pazienti
         container.innerHTML = '';
@@ -258,11 +270,10 @@ class PatientManager {
         
         card.innerHTML = `
             <div class="patient-header">
-                <h3>${patient.name}</h3>
+                <h3>${patient.name} (${patient.age} anni)</h3>
                 <div class="patient-details">
-                    <span class="age">Età: ${patient.age} anni</span>
-                    <span class="room">🛏️ Letto: ${patient.room}</span>
-                    <span class="admission-date">📅 Inserimento: ${formattedDate}</span>
+                    <div class="bed-info">🛏️ Letto: ${patient.room}</div>
+                    <div class="admission-date">📅 Inserimento: ${formattedDate}</div>
                 </div>
             </div>
             <div class="patient-info">
@@ -434,16 +445,6 @@ class PatientManager {
                 callback: this.handleTokenResponse.bind(this)
             });
             
-            // Inizializza gapi per le chiamate API
-            await new Promise((resolve) => {
-                gapi.load('client', resolve);
-            });
-            
-            await gapi.client.init({
-                apiKey: 'AIzaSyB9PjKTZzsJLQAX8FWSUl0uFr8EA7L9d1Q',
-                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
-            });
-            
             this.googleAPIReady = true;
             this.updateGoogleStatus();
             
@@ -459,7 +460,7 @@ class PatientManager {
     async waitForGoogleScripts() {
         return new Promise((resolve) => {
             const checkGoogle = () => {
-                if (typeof google !== 'undefined' && typeof gapi !== 'undefined') {
+                if (typeof google !== 'undefined') {
                     resolve();
                 } else {
                     setTimeout(checkGoogle, 100);
@@ -478,7 +479,6 @@ class PatientManager {
         console.log('Token response ricevuto:', response);
         if (response.access_token) {
             this.accessToken = response.access_token;
-            gapi.client.setToken({ access_token: this.accessToken });
             this.isGoogleSignedIn = true;
             this.updateGoogleStatus();
             this.loadFromGoogleDrive();
@@ -514,210 +514,47 @@ class PatientManager {
             if (this.accessToken) {
                 google.accounts.oauth2.revoke(this.accessToken);
                 this.accessToken = null;
-                gapi.client.setToken(null);
             }
+            
             this.isGoogleSignedIn = false;
             this.updateGoogleStatus();
-            console.log('Logout Google completato');
+            
+            console.log('Disconnesso da Google Drive');
+            
         } catch (error) {
-            console.error('Errore nel logout Google:', error);
+            console.error('Errore durante la disconnessione:', error);
         }
     }
 
     updateGoogleStatus() {
+        const statusElement = document.getElementById('googleStatus');
         const signInBtn = document.getElementById('googleSignInBtn');
         const signOutBtn = document.getElementById('googleSignOutBtn');
-        const status = document.getElementById('googleStatus');
         
-        if (!this.googleAPIReady) {
-            signInBtn.style.display = 'inline-flex';
-            signOutBtn.style.display = 'none';
-            status.textContent = '⏳ Inizializzazione Google API...';
-            status.className = 'sync-status inactive';
-        } else if (this.isGoogleSignedIn) {
+        if (this.isGoogleSignedIn) {
+            statusElement.textContent = '✅ Connesso a Google Drive';
+            statusElement.className = 'sync-status active';
             signInBtn.style.display = 'none';
-            signOutBtn.style.display = 'inline-flex';
-            status.textContent = '✅ Connesso a Google Drive';
-            status.className = 'sync-status active';
+            signOutBtn.style.display = 'inline-block';
         } else {
-            signInBtn.style.display = 'inline-flex';
+            statusElement.textContent = '❌ Non connesso a Google Drive';
+            statusElement.className = 'sync-status';
+            signInBtn.style.display = 'inline-block';
             signOutBtn.style.display = 'none';
-            status.textContent = '❌ Non connesso a Google Drive';
-            status.className = 'sync-status inactive';
-        }
-    }
-
-    async syncToGoogleDrive() {
-        if (!this.isGoogleSignedIn || !this.accessToken) return;
-        
-        try {
-            console.log('Inizio sincronizzazione con Google Drive...');
-            
-            // Prima, cerca o crea la cartella "Consegne"
-            let folderId = await this.getOrCreateFolder('Consegne');
-            
-            const dataToSync = {
-                patients: this.patients,
-                lastUpdated: new Date().toISOString(),
-                computerId: this.computerId
-            };
-            
-            const fileContent = JSON.stringify(dataToSync, null, 2);
-            
-            // Cerca se il file esiste già
-            const existingFile = await this.findFileInFolder('consegne_data.json', folderId);
-            
-            if (existingFile) {
-                // Aggiorna il file esistente
-                await this.updateFile(existingFile.id, fileContent);
-                console.log('File aggiornato su Google Drive');
-            } else {
-                // Crea un nuovo file
-                await this.createFile('consegne_data.json', fileContent, folderId);
-                console.log('Nuovo file creato su Google Drive');
-            }
-            
-        } catch (error) {
-            console.error('Errore nella sincronizzazione con Google Drive:', error);
-            alert('Errore nella sincronizzazione: ' + error.message);
-        }
-    }
-
-    // Funzione per trovare o creare una cartella
-    async getOrCreateFolder(folderName) {
-        try {
-            // Cerca la cartella esistente
-            const response = await gapi.client.drive.files.list({
-                q: `name='${folderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-                fields: 'files(id, name)'
-            });
-            
-            if (response.result.files.length > 0) {
-                return response.result.files[0].id;
-            }
-            
-            // Crea la cartella se non esiste
-            const folderMetadata = {
-                name: folderName,
-                mimeType: 'application/vnd.google-apps.folder'
-            };
-            
-            const folder = await gapi.client.drive.files.create({
-                resource: folderMetadata,
-                fields: 'id'
-            });
-            
-            console.log(`Cartella "${folderName}" creata con ID:`, folder.result.id);
-            return folder.result.id;
-            
-        } catch (error) {
-            console.error('Errore nella gestione della cartella:', error);
-            throw error;
-        }
-    }
-
-    // Funzione per cercare un file in una cartella specifica
-    async findFileInFolder(fileName, folderId) {
-        try {
-            const response = await gapi.client.drive.files.list({
-                q: `name='${fileName}' and '${folderId}' in parents and trashed=false`,
-                fields: 'files(id, name)'
-            });
-            
-            return response.result.files.length > 0 ? response.result.files[0] : null;
-        } catch (error) {
-            console.error('Errore nella ricerca del file:', error);
-            return null;
-        }
-    }
-
-    // Funzione per creare un nuovo file
-    async createFile(fileName, content, folderId) {
-        const boundary = '-------314159265358979323846';
-        const delimiter = "\r\n--" + boundary + "\r\n";
-        const close_delim = "\r\n--" + boundary + "--";
-        
-        const metadata = {
-            name: fileName,
-            parents: [folderId]
-        };
-        
-        const multipartRequestBody =
-            delimiter +
-            'Content-Type: application/json\r\n\r\n' +
-            JSON.stringify(metadata) +
-            delimiter +
-            'Content-Type: application/json\r\n\r\n' +
-            content +
-            close_delim;
-        
-        return await gapi.client.request({
-            path: 'https://www.googleapis.com/upload/drive/v3/files',
-            method: 'POST',
-            params: { uploadType: 'multipart' },
-            headers: {
-                'Content-Type': 'multipart/related; boundary="' + boundary + '"'
-            },
-            body: multipartRequestBody
-        });
-    }
-
-    // Funzione per aggiornare un file esistente
-    async updateFile(fileId, content) {
-        return await gapi.client.request({
-            path: `https://www.googleapis.com/upload/drive/v3/files/${fileId}`,
-            method: 'PATCH',
-            params: { uploadType: 'media' },
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: content
-        });
-    }
-
-    async loadFromGoogleDrive() {
-        if (!this.isGoogleSignedIn || !this.accessToken) return;
-        
-        try {
-            console.log('Caricamento dati da Google Drive...');
-            
-            // Cerca la cartella "Consegne"
-            const folderId = await this.getOrCreateFolder('Consegne');
-            
-            // Cerca il file nella cartella
-            const file = await this.findFileInFolder('consegne_data.json', folderId);
-            
-            if (file) {
-                const fileResponse = await gapi.client.drive.files.get({
-                    fileId: file.id,
-                    alt: 'media'
-                });
-                
-                const data = JSON.parse(fileResponse.body);
-                this.patients = data.patients || [];
-                this.saveLocalData();
-                this.renderPatients();
-                console.log('Dati caricati da Google Drive:', this.patients.length, 'pazienti');
-            } else {
-                console.log('File non trovato su Google Drive');
-            }
-            
-        } catch (error) {
-            console.error('Errore nel caricamento da Google Drive:', error);
         }
     }
 
     toggleAutoSync(enabled) {
         this.autoSyncEnabled = enabled;
-        const status = document.getElementById('syncStatus');
+        const syncStatus = document.getElementById('syncStatus');
         
         if (enabled) {
-            status.textContent = '🟢 Auto-sync attivo';
-            status.className = 'sync-status active';
+            syncStatus.textContent = '🟢 Auto-sync attivo';
+            syncStatus.className = 'sync-status active';
             this.startAutoSync();
         } else {
-            status.textContent = '⏸️ Auto-sync disattivo';
-            status.className = 'sync-status inactive';
+            syncStatus.textContent = '🔴 Auto-sync disattivo';
+            syncStatus.className = 'sync-status';
             this.stopAutoSync();
         }
     }
@@ -727,12 +564,12 @@ class PatientManager {
             clearInterval(this.syncInterval);
         }
         
-        // Sincronizza ogni 30 secondi se connesso
+        // Sincronizza ogni 5 minuti se connesso a Google Drive
         this.syncInterval = setInterval(() => {
             if (this.isGoogleSignedIn && this.autoSyncEnabled) {
                 this.syncToGoogleDrive();
             }
-        }, 30000);
+        }, 5 * 60 * 1000);
     }
 
     stopAutoSync() {
@@ -741,72 +578,182 @@ class PatientManager {
             this.syncInterval = null;
         }
     }
-}
 
-// Inizializza l'applicazione quando il DOM è pronto
-let patientManager;
-document.addEventListener('DOMContentLoaded', () => {
-    patientManager = new PatientManager();
-});
-
-// Funzioni globali per compatibilità
-function openModal(patient = null) {
-    patientManager.openModal(patient);
-}
-
-function closeModal() {
-    patientManager.closeModal();
-}
-
-    sortByRoom() {
-        this.renderPatients(true);
+    async getOrCreateFolder() {
+        try {
+            const response = await fetch('https://www.googleapis.com/drive/v3/files?q=name="Consegne_Medicina_Urgenza"+and+mimeType="application/vnd.google-apps.folder"', {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.files && data.files.length > 0) {
+                return data.files[0].id;
+            } else {
+                // Crea la cartella
+                const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        name: 'Consegne_Medicina_Urgenza',
+                        mimeType: 'application/vnd.google-apps.folder'
+                    })
+                });
+                
+                const createData = await createResponse.json();
+                return createData.id;
+            }
+        } catch (error) {
+            console.error('Errore nella gestione della cartella:', error);
+            throw error;
+        }
     }
 
-    renderPatients(sortByRoom = false) {
-        const container = document.getElementById('patientsContainer');
-        const filterPriority = document.getElementById('filterPriority').value;
-        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-
-        // Filtra pazienti
-        let filteredPatients = this.patients.filter(patient => {
-            const matchesSearch = !searchTerm || 
-                patient.name.toLowerCase().includes(searchTerm) ||
-                patient.room.toLowerCase().includes(searchTerm);
-            const matchesPriority = filterPriority === 'all' || patient.priority === filterPriority;
-            return matchesSearch && matchesPriority;
-        });
-
-        // Ordina pazienti per numero di letto se richiesto
-        if (sortByRoom) {
-            filteredPatients.sort((a, b) => {
-                const roomA = a.room || '';
-                const roomB = b.room || '';
-                
-                // Estrae i numeri dai nomi delle stanze per un ordinamento numerico intelligente
-                const getNumericValue = (room) => {
-                    const match = room.match(/\d+/);
-                    return match ? parseInt(match[0]) : 999999;
-                };
-                
-                const numA = getNumericValue(roomA);
-                const numB = getNumericValue(roomB);
-                
-                if (numA !== numB) {
-                    return numA - numB;
-                }
-                
-                // Se i numeri sono uguali, ordina alfabeticamente
-                return roomA.localeCompare(roomB);
-            });
+    async syncToGoogleDrive() {
+        if (!this.isGoogleSignedIn || !this.accessToken) {
+            console.log('Non connesso a Google Drive');
+            return;
         }
 
-        // Renderizza pazienti
-        container.innerHTML = '';
-        filteredPatients.forEach(patient => {
-            const patientCard = this.createPatientCard(patient);
-            container.appendChild(patientCard);
-        });
-
-        // Aggiorna contatore
-        document.getElementById('patientCount').textContent = `Pazienti: ${filteredPatients.length}`;
+        try {
+            console.log('Sincronizzazione con Google Drive...');
+            
+            const folderId = await this.getOrCreateFolder();
+            const fileName = `consegne_${this.computerId}.json`;
+            
+            // Cerca il file esistente
+            const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"`, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            const searchData = await searchResponse.json();
+            
+            const dataToSync = {
+                patients: this.patients,
+                lastUpdated: new Date().toISOString(),
+                computerId: this.computerId
+            };
+            
+            const fileContent = JSON.stringify(dataToSync, null, 2);
+            
+            if (searchData.files && searchData.files.length > 0) {
+                // Aggiorna il file esistente
+                const fileId = searchData.files[0].id;
+                
+                const updateResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: fileContent
+                });
+                
+                if (updateResponse.ok) {
+                    console.log('File aggiornato su Google Drive');
+                } else {
+                    throw new Error('Errore nell\'aggiornamento del file');
+                }
+            } else {
+                // Crea un nuovo file
+                const createResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'multipart/related; boundary="foo_bar_baz"'
+                    },
+                    body: [
+                        '--foo_bar_baz',
+                        'Content-Type: application/json; charset=UTF-8',
+                        '',
+                        JSON.stringify({
+                            name: fileName,
+                            parents: [folderId]
+                        }),
+                        '--foo_bar_baz',
+                        'Content-Type: application/json',
+                        '',
+                        fileContent,
+                        '--foo_bar_baz--'
+                    ].join('\r\n')
+                });
+                
+                if (createResponse.ok) {
+                    console.log('Nuovo file creato su Google Drive');
+                } else {
+                    throw new Error('Errore nella creazione del file');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Errore nella sincronizzazione:', error);
+        }
     }
+
+    async loadFromGoogleDrive() {
+        if (!this.isGoogleSignedIn || !this.accessToken) {
+            console.log('Non connesso a Google Drive');
+            return;
+        }
+
+        try {
+            console.log('Caricamento da Google Drive...');
+            
+            const folderId = await this.getOrCreateFolder();
+            const fileName = `consegne_${this.computerId}.json`;
+            
+            // Cerca il file
+            const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"`, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            const searchData = await searchResponse.json();
+            
+            if (searchData.files && searchData.files.length > 0) {
+                const fileId = searchData.files[0].id;
+                
+                // Scarica il contenuto del file
+                const downloadResponse = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`
+                    }
+                });
+                
+                if (downloadResponse.ok) {
+                    const fileContent = await downloadResponse.text();
+                    const data = JSON.parse(fileContent);
+                    
+                    if (data.patients) {
+                        this.patients = data.patients;
+                        this.saveLocalData();
+                        this.renderPatients();
+                        console.log('Dati caricati da Google Drive:', this.patients.length, 'pazienti');
+                    }
+                } else {
+                    throw new Error('Errore nel download del file');
+                }
+            } else {
+                console.log('Nessun file trovato su Google Drive per questo computer');
+            }
+            
+        } catch (error) {
+            console.error('Errore nel caricamento da Google Drive:', error);
+        }
+    }
+}
+
+// Inizializza l'applicazione
+let patientManager;
+
+window.addEventListener('DOMContentLoaded', () => {
+    patientManager = new PatientManager();
+});
