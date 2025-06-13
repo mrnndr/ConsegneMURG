@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Consegne Medicina d'Urgenza</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google APIs -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 CONSEGNE MEDICINA D'URGENZA</h1>
+            <div class="header-controls">
+                <button id="refreshBtn" class="btn btn-primary">🔄 Aggiorna</button>
+                <button id="addPatientBtn" class="btn btn-success">➕ Nuovo Paziente</button>
+                <span id="lastUpdate" class="last-update"></span>
+            </div>
+        </header>
+
+        <!-- Pannello di controllo sincronizzazione -->
+        <div class="sync-panel">
+            <div class="sync-controls">
+                <button id="googleSignInBtn" class="btn btn-google">🔐 Accedi a Google Drive</button>
+                <button id="googleSignOutBtn" class="btn btn-google" style="display: none;">🚪 Disconnetti</button>
+                <span id="googleStatus" class="sync-status">❌ Non connesso a Google Drive</span>
+                
+                <label class="sync-toggle">
+                    <input type="checkbox" id="autoSyncToggle" checked>
+                    <span class="toggle-slider"></span>
+                    Auto-Sync Google Drive
+                </label>
+                <span id="syncStatus" class="sync-status active">🟢 Auto-sync attivo</span>
+            </div>
+        </div>
+
+        <!-- Filtri e controlli -->
+        <div class="filters">
+            <div class="filter-group">
+                <label for="sortBy">Ordina per:</label>
+                <select id="sortBy">
+                    <option value="room">Letto</option>
+                    <option value="priority">Priorità</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="filterPriority">Filtra priorità:</label>
+                <select id="filterPriority">
+                    <option value="all">Tutte</option>
+                    <option value="alert">Alert</option>
+                    <option value="gestione">Gestione</option>
+                    <option value="dimissione">Dimissione</option>
+                    <option value="trasferimento">Trasferimento</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <input type="text" id="searchInput" placeholder="🔍 Cerca paziente...">
+            </div>
+            
+            <div class="info-panel">
+                <small id="patientCount">Pazienti: 0</small>
+            </div>
+        </div>
+
+        <!-- Griglia pazienti -->
+        <div id="patientsContainer" class="patients-grid">
+            <!-- I pazienti verranno inseriti qui dinamicamente -->
+        </div>
+
+        <!-- Modal per aggiungere/modificare paziente -->
+        <div id="patientModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Gestione Paziente</h2>
+                    <span id="closeModal" class="close">&times;</span>
+                </div>
+                
+                <form id="patientForm">
+                    <div class="form-group">
+                        <label for="patientName">Nome Paziente *</label>
+                        <input type="text" id="patientName" name="name" required>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="patientAge">Età *</label>
+                            <input type="number" id="patientAge" name="age" min="0" max="120" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="patientRoom">Numero Letto *</label>
+                            <input type="text" id="patientRoom" name="room" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="patientPriority">Priorità</label>
+                            <select id="patientPriority" name="priority">
+                                <option value="gestione">Gestione</option>
+                                <option value="alert">Alert</option>
+                                <option value="dimissione">Dimissione</option>
+                                <option value="trasferimento">Trasferimento</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="recentHistory">🩺 Anamnesi Recente</label>
+                        <textarea id="recentHistory" name="recentHistory" rows="3" placeholder="Sintomi attuali, motivo del ricovero..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="pastHistory">📋 Anamnesi Remota</label>
+                        <textarea id="pastHistory" name="pastHistory" rows="3" placeholder="Patologie pregresse, allergie..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="management">💊 Decorso e Programma</label>
+                        <textarea id="management" name="management" rows="3" placeholder="Terapie, procedure, monitoraggio..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="notes">📝 Note Consegna</label>
+                        <textarea id="notes" name="notes" rows="3" placeholder="Note aggiuntive, osservazioni..."></textarea>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">💾 Salva</button>
+                        <button type="button" id="cancelBtn" class="btn btn-secondary" onclick="closeModal()">❌ Annulla</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
