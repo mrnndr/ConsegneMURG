@@ -136,6 +136,40 @@
         </div>
     </div>
 
+    <!-- Modal per spostamento paziente -->
+    <div id="moveModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🔄 Sposta Paziente</h2>
+                <span class="close" id="closeMoveModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="moveForm">
+                    <div class="form-group">
+                        <label for="currentPatientInfo">Paziente da spostare:</label>
+                        <div id="currentPatientInfo" class="patient-info-display"></div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="newRoom">Nuovo letto *</label>
+                        <input type="text" id="newRoom" name="newRoom" required placeholder="Es: 101A">
+                    </div>
+                    
+                    <div id="conflictWarning" class="conflict-warning" style="display: none;">
+                        <h4>⚠️ Letto occupato!</h4>
+                        <div id="conflictPatientInfo"></div>
+                        <p>Vuoi scambiare i pazienti di posto?</p>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">🔄 Sposta</button>
+                        <button type="button" id="cancelMoveBtn" class="btn btn-secondary">❌ Annulla</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
