@@ -40,19 +40,35 @@ class PatientManager {
         
         // Modal
         document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
+        // Modal spostamento
+        document.getElementById('closeMoveModal').addEventListener('click', () => this.closeMoveModal());
+        document.getElementById('cancelMoveBtn').addEventListener('click', () => this.closeMoveModal());
+        document.getElementById('moveForm').addEventListener('submit', (e) => this.movePatient(e));
         
-        // Form
-        document.getElementById('patientForm').addEventListener('submit', (e) => this.savePatient(e));
-        
-        // Filtri
-        document.getElementById('sortBy').addEventListener('change', () => this.renderPatients());
-        document.getElementById('filterPriority').addEventListener('change', () => this.renderPatients());
-        document.getElementById('searchInput').addEventListener('input', () => this.renderPatients());
+        // Controllo conflitto in tempo reale
+        document.getElementById('newRoom').addEventListener('input', (e) => {
+            const newRoom = e.target.value.trim();
+            if (newRoom && this.currentMovePatient) {
+                const conflict = this.checkRoomConflict(newRoom);
+                const conflictWarning = document.getElementById('conflictWarning');
+                
+                if (conflict) {
+                    this.showRoomConflict(conflict, newRoom);
+                } else {
+                    conflictWarning.style.display = 'none';
+                    const submitBtn = document.querySelector('#moveForm button[type="submit"]');
+                    submitBtn.innerHTML = '🔄 Sposta';
+                    submitBtn.onclick = null;
+                }
+            }
+        });
         
         // Chiusura modal cliccando fuori
         window.addEventListener('click', (e) => {
             const modal = document.getElementById('patientModal');
+            const moveModal = document.getElementById('moveModal');
             if (e.target === modal) this.closeModal();
+            if (e.target === moveModal) this.closeMoveModal();
         });
     }
 
@@ -258,8 +274,9 @@ class PatientManager {
                 <p><strong>Priorità:</strong> <span class="priority-badge priority-${patient.priority}">${patient.priority}</span></p>
             </div>
             <div class="patient-actions">
-                <button onclick="patientManager.openModal(${JSON.stringify(patient).replace(/"/g, '&quot;')})" class="btn btn-edit">✏️ Modifica</button>
-                <button onclick="patientManager.deletePatient('${patient.id}')" class="btn btn-delete">🗑️ Elimina</button>
+                <button onclick="patientManager.openModal(${JSON.stringify(patient).replace(/"/g, '&quot;')})", class="btn btn-edit">✏️ Modifica</button>
+                <button onclick="patientManager.openMoveModal('${patient.id}')", class="btn btn-move">🔄 Sposta</button>
+                <button onclick="patientManager.deletePatient('${patient.id}')", class="btn btn-delete">🗑️ Elimina</button>
             </div>
         `;
         return card;
@@ -530,6 +547,131 @@ class PatientManager {
         if (this.syncInterval) {
             clearInterval(this.syncInterval);
             this.syncInterval = null;
+        }
+    }
+
+    openMoveModal(patientId) {
+        this.currentMovePatient = this.patients.find(p => p.id === patientId);
+        if (!this.currentMovePatient) return;
+        
+        const modal = document.getElementById('moveModal');
+        const form = document.getElementById('moveForm');
+        const patientInfo = document.getElementById('currentPatientInfo');
+        const conflictWarning = document.getElementById('conflictWarning');
+        
+        // Mostra info paziente corrente
+        patientInfo.innerHTML = `
+            <strong>${this.currentMovePatient.name}</strong><br>
+            Letto attuale: <strong>${this.currentMovePatient.room}</strong><br>
+            Età: ${this.currentMovePatient.age}
+        `;
+        
+        // Reset form
+        form.reset();
+        conflictWarning.style.display = 'none';
+        
+        modal.style.display = 'block';
+    }
+
+    closeMoveModal() {
+        document.getElementById('moveModal').style.display = 'none';
+        this.currentMovePatient = null;
+        this.conflictPatient = null;
+    }
+
+    checkRoomConflict(newRoom) {
+        return this.patients.find(p => 
+            p.room.toLowerCase() === newRoom.toLowerCase() && 
+            p.id !== this.currentMovePatient.id
+        );
+    }
+
+    movePatient(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(e.target);
+        const newRoom = formData.get('newRoom').trim();
+        
+        if (!newRoom) {
+            alert('Inserisci il numero del nuovo letto');
+            return;
+        }
+        
+        // Controlla se il letto è già occupato
+        const conflictPatient = this.checkRoomConflict(newRoom);
+        
+        if (conflictPatient) {
+            this.showRoomConflict(conflictPatient, newRoom);
+        } else {
+            this.performMove(newRoom);
+        }
+    }
+
+    showRoomConflict(conflictPatient, newRoom) {
+        this.conflictPatient = conflictPatient;
+        const conflictWarning = document.getElementById('conflictWarning');
+        const conflictInfo = document.getElementById('conflictPatientInfo');
+        
+        conflictInfo.innerHTML = `
+            <strong>${conflictPatient.name}</strong> (Età: ${conflictPatient.age})<br>
+            attualmente nel letto <strong>${conflictPatient.room}</strong>
+        `;
+        
+        conflictWarning.style.display = 'block';
+        
+        // Cambia il testo del pulsante
+        const submitBtn = document.querySelector('#moveForm button[type="submit"]');
+        submitBtn.innerHTML = '🔄 Scambia Pazienti';
+        submitBtn.onclick = (e) => {
+            e.preventDefault();
+            this.performSwap(newRoom);
+        };
+    }
+
+    performMove(newRoom) {
+        const oldRoom = this.currentMovePatient.room;
+        
+        // Aggiorna il letto del paziente
+        const patientIndex = this.patients.findIndex(p => p.id === this.currentMovePatient.id);
+        if (patientIndex !== -1) {
+            this.patients[patientIndex].room = newRoom;
+            this.patients[patientIndex].lastUpdated = new Date().toISOString();
+            
+            this.saveData();
+            this.renderPatients();
+            this.closeMoveModal();
+            this.updateLastUpdateTime();
+            
+            alert(`✅ ${this.currentMovePatient.name} spostato dal letto ${oldRoom} al letto ${newRoom}`);
+        }
+    }
+
+    performSwap(newRoom) {
+        const patient1 = this.currentMovePatient;
+        const patient2 = this.conflictPatient;
+        const oldRoom1 = patient1.room;
+        const oldRoom2 = patient2.room;
+        
+        // Trova gli indici dei pazienti
+        const index1 = this.patients.findIndex(p => p.id === patient1.id);
+        const index2 = this.patients.findIndex(p => p.id === patient2.id);
+        
+        if (index1 !== -1 && index2 !== -1) {
+            // Scambia i letti
+            this.patients[index1].room = newRoom;
+            this.patients[index2].room = oldRoom1;
+            
+            // Aggiorna timestamp
+            const now = new Date().toISOString();
+            this.patients[index1].lastUpdated = now;
+            this.patients[index2].lastUpdated = now;
+            
+            this.saveData();
+            this.renderPatients();
+            this.closeMoveModal();
+            this.updateLastUpdateTime();
+            
+            alert(`✅ Scambio completato:\n${patient1.name}: ${oldRoom1} → ${newRoom}\n${patient2.name}: ${oldRoom2} → ${oldRoom1}`);
         }
     }
 }
