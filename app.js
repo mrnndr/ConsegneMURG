@@ -10,6 +10,8 @@ class PatientManager {
         this.googleAPIReady = false;
         this.accessToken = null;
         this.tokenClient = null;
+        this.lastKnownVersion = null;
+        this.isModifying = false;
         
         this.init();
     }
@@ -89,6 +91,7 @@ class PatientManager {
             if (data) {
                 const parsedData = JSON.parse(data);
                 this.patients = parsedData.patients || [];
+                this.lastKnownVersion = parsedData.version;
                 console.log('Dati caricati dal localStorage:', this.patients.length, 'pazienti');
             }
         } catch (error) {
@@ -99,12 +102,15 @@ class PatientManager {
 
     saveLocalData() {
         try {
+            const version = this.generateVersion();
             const dataToSave = {
                 patients: this.patients,
                 lastUpdated: new Date().toISOString(),
-                computerId: this.computerId
+                computerId: this.computerId,
+                version: version
             };
             localStorage.setItem('patientsData', JSON.stringify(dataToSave));
+            this.lastKnownVersion = version;
             console.log('Dati salvati nel localStorage');
         } catch (error) {
             console.error('Errore nel salvataggio dei dati locali:', error);
@@ -113,14 +119,14 @@ class PatientManager {
 
     saveData() {
         this.saveLocalData();
-        if (this.isGoogleSignedIn && this.autoSyncEnabled) {
+        if (this.isGoogleSignedIn && this.autoSyncEnabled && !this.isModifying) {
             this.syncToGoogleDrive();
         }
     }
 
-    refreshData() {
+    async refreshData() {
         if (this.isGoogleSignedIn) {
-            this.loadFromGoogleDrive();
+            await this.loadFromGoogleDrive();
         } else {
             this.loadLocalData();
             this.renderPatients();
@@ -157,8 +163,11 @@ class PatientManager {
         this.currentPatient = null;
     }
 
-    savePatient(e) {
+    async savePatient(e) {
         e.preventDefault();
+        
+        this.isModifying = true;
+        this.updateSyncIndicator('saving');
         
         const formData = new FormData(e.target);
         const patientData = {
@@ -192,6 +201,15 @@ class PatientManager {
         this.renderPatients();
         this.closeModal();
         this.updateLastUpdateTime();
+        
+        this.isModifying = false;
+        
+        // Sincronizza immediatamente dopo il salvataggio
+        if (this.isGoogleSignedIn && this.autoSyncEnabled) {
+            await this.syncToGoogleDrive();
+        }
+        
+        this.updateSyncIndicator('synced');
     }
 
     deletePatient(patientId) {
@@ -205,6 +223,10 @@ class PatientManager {
 
     generateId() {
         return Date.now().toString() + Math.random().toString(36).substr(2, 5);
+    }
+
+    generateVersion() {
+        return Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
     }
 
     sortByRoom() {
@@ -424,6 +446,228 @@ class PatientManager {
         document.getElementById('lastUpdate').textContent = `Ultimo aggiornamento: ${timeString}`;
     }
 
+    // Nuove funzioni per la gestione dei conflitti
+    async checkForConflicts() {
+        if (!this.isGoogleSignedIn || !this.accessToken) {
+            return false;
+        }
+
+        try {
+            const folderId = await this.getOrCreateFolder();
+            const fileName = 'consegne_shared.json';
+            
+            const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"&fields=files(id,modifiedTime)`, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            const searchData = await searchResponse.json();
+            
+            if (searchData.files && searchData.files.length > 0) {
+                const remoteFile = searchData.files[0];
+                const remoteModifiedTime = new Date(remoteFile.modifiedTime);
+                const localModifiedTime = this.lastKnownVersion ? new Date(parseInt(this.lastKnownVersion.split('_')[0])) : new Date(0);
+                
+                return remoteModifiedTime > localModifiedTime;
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('Errore nel controllo conflitti:', error);
+            return false;
+        }
+    }
+
+    hasLocalChanges() {
+        const localData = localStorage.getItem('patientsData');
+        if (!localData) return false;
+        
+        const parsedData = JSON.parse(localData);
+        const localVersion = parsedData.version;
+        
+        return localVersion !== this.lastKnownVersion;
+    }
+
+    async handleConflict() {
+        const choice = await this.showConflictDialog();
+        
+        if (choice === 'local') {
+            // Forza il salvataggio dei dati locali
+            await this.forceSyncToGoogleDrive();
+            this.showNotification('I tuoi dati locali sono stati salvati su Google Drive', 'success');
+        } else if (choice === 'remote') {
+            // Carica i dati remoti
+            await this.loadFromGoogleDrive();
+            this.showNotification('Dati aggiornati da Google Drive', 'info');
+        }
+    }
+
+    showConflictDialog() {
+        return new Promise((resolve) => {
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.style.display = 'block';
+            
+            modal.innerHTML = `
+                <div class="modal-content conflict-modal">
+                    <div class="modal-header">
+                        <h2>⚠️ Conflitto Rilevato</h2>
+                    </div>
+                    <div class="modal-body">
+                        <p>Sono state rilevate modifiche simultanee ai dati. Scegli quale versione mantenere:</p>
+                        <div class="conflict-options">
+                            <button id="keepLocal" class="btn btn-primary">📱 Mantieni Dati Locali</button>
+                            <button id="keepRemote" class="btn btn-warning">☁️ Carica da Google Drive</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            
+            document.getElementById('keepLocal').onclick = () => {
+                document.body.removeChild(modal);
+                resolve('local');
+            };
+            
+            document.getElementById('keepRemote').onclick = () => {
+                document.body.removeChild(modal);
+                resolve('remote');
+            };
+        });
+    }
+
+    async forceSyncToGoogleDrive() {
+        if (!this.isGoogleSignedIn || !this.accessToken) {
+            return;
+        }
+
+        try {
+            const folderId = await this.getOrCreateFolder();
+            const fileName = 'consegne_shared.json';
+            
+            const version = this.generateVersion();
+            const dataToSync = {
+                patients: this.patients,
+                lastUpdated: new Date().toISOString(),
+                version: version,
+                activeComputers: await this.getActiveComputerCount()
+            };
+            
+            const fileContent = JSON.stringify(dataToSync, null, 2);
+            
+            // Cerca il file esistente
+            const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"`, {
+                headers: {
+                    'Authorization': `Bearer ${this.accessToken}`
+                }
+            });
+            
+            const searchData = await searchResponse.json();
+            
+            if (searchData.files && searchData.files.length > 0) {
+                // Aggiorna il file esistente
+                const fileId = searchData.files[0].id;
+                
+                const updateResponse = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: fileContent
+                });
+                
+                if (updateResponse.ok) {
+                    this.lastKnownVersion = version;
+                    console.log('File forzato su Google Drive');
+                }
+            } else {
+                // Crea un nuovo file
+                const createResponse = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'multipart/related; boundary="foo_bar_baz"'
+                    },
+                    body: [
+                        '--foo_bar_baz',
+                        'Content-Type: application/json; charset=UTF-8',
+                        '',
+                        JSON.stringify({
+                            name: fileName,
+                            parents: [folderId]
+                        }),
+                        '--foo_bar_baz',
+                        'Content-Type: application/json',
+                        '',
+                        fileContent,
+                        '--foo_bar_baz--'
+                    ].join('\r\n')
+                });
+                
+                if (createResponse.ok) {
+                    this.lastKnownVersion = version;
+                    console.log('Nuovo file condiviso creato su Google Drive');
+                }
+            }
+            
+        } catch (error) {
+            console.error('Errore nella sincronizzazione forzata:', error);
+        }
+    }
+
+    async getActiveComputerCount() {
+        // Simula il conteggio dei computer attivi
+        return 1;
+    }
+
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 100);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
+            }, 300);
+        }, 3000);
+    }
+
+    updateSyncIndicator(status) {
+        const indicator = document.getElementById('syncIndicator');
+        if (!indicator) return;
+        
+        indicator.className = `sync-indicator sync-${status}`;
+        
+        switch (status) {
+            case 'syncing':
+                indicator.textContent = '🔄 Sincronizzazione...';
+                break;
+            case 'synced':
+                indicator.textContent = '✅ Sincronizzato';
+                break;
+            case 'saving':
+                indicator.textContent = '💾 Salvataggio...';
+                break;
+            case 'error':
+                indicator.textContent = '❌ Errore sync';
+                break;
+            default:
+                indicator.textContent = '⏸️ Non sincronizzato';
+        }
+    }
+
     // Google Drive Integration con nuovo Google Identity Services
     async initGoogleAPI() {
         try {
@@ -564,12 +808,17 @@ class PatientManager {
             clearInterval(this.syncInterval);
         }
         
-        // Sincronizza ogni 5 minuti se connesso a Google Drive
-        this.syncInterval = setInterval(() => {
-            if (this.isGoogleSignedIn && this.autoSyncEnabled) {
-                this.syncToGoogleDrive();
+        // Sincronizza ogni 30 secondi per controlli più frequenti
+        this.syncInterval = setInterval(async () => {
+            if (this.isGoogleSignedIn && this.autoSyncEnabled && !this.isModifying) {
+                const hasConflicts = await this.checkForConflicts();
+                if (hasConflicts) {
+                    await this.handleConflict();
+                } else {
+                    await this.loadFromGoogleDrive();
+                }
             }
-        }, 5 * 60 * 1000);
+        }, 30 * 1000);
     }
 
     stopAutoSync() {
@@ -621,10 +870,18 @@ class PatientManager {
         }
 
         try {
+            this.updateSyncIndicator('syncing');
             console.log('Sincronizzazione con Google Drive...');
             
+            // Controlla conflitti prima di salvare
+            const hasConflicts = await this.checkForConflicts();
+            if (hasConflicts) {
+                await this.handleConflict();
+                return;
+            }
+            
             const folderId = await this.getOrCreateFolder();
-            const fileName = `consegne_${this.computerId}.json`;
+            const fileName = 'consegne_shared.json';
             
             // Cerca il file esistente
             const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"`, {
@@ -635,10 +892,12 @@ class PatientManager {
             
             const searchData = await searchResponse.json();
             
+            const version = this.generateVersion();
             const dataToSync = {
                 patients: this.patients,
                 lastUpdated: new Date().toISOString(),
-                computerId: this.computerId
+                version: version,
+                activeComputers: await this.getActiveComputerCount()
             };
             
             const fileContent = JSON.stringify(dataToSync, null, 2);
@@ -657,7 +916,9 @@ class PatientManager {
                 });
                 
                 if (updateResponse.ok) {
+                    this.lastKnownVersion = version;
                     console.log('File aggiornato su Google Drive');
+                    this.updateSyncIndicator('synced');
                 } else {
                     throw new Error('Errore nell\'aggiornamento del file');
                 }
@@ -686,7 +947,9 @@ class PatientManager {
                 });
                 
                 if (createResponse.ok) {
+                    this.lastKnownVersion = version;
                     console.log('Nuovo file creato su Google Drive');
+                    this.updateSyncIndicator('synced');
                 } else {
                     throw new Error('Errore nella creazione del file');
                 }
@@ -694,6 +957,7 @@ class PatientManager {
             
         } catch (error) {
             console.error('Errore nella sincronizzazione:', error);
+            this.updateSyncIndicator('error');
         }
     }
 
@@ -707,7 +971,7 @@ class PatientManager {
             console.log('Caricamento da Google Drive...');
             
             const folderId = await this.getOrCreateFolder();
-            const fileName = `consegne_${this.computerId}.json`;
+            const fileName = 'consegne_shared.json';
             
             // Cerca il file
             const searchResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=name="${fileName}"+and+parents+in+"${folderId}"`, {
@@ -733,7 +997,14 @@ class PatientManager {
                     const data = JSON.parse(fileContent);
                     
                     if (data.patients) {
+                        // Controlla se ci sono conflitti
+                        if (this.hasLocalChanges() && data.version !== this.lastKnownVersion) {
+                            await this.handleConflict();
+                            return;
+                        }
+                        
                         this.patients = data.patients;
+                        this.lastKnownVersion = data.version;
                         this.saveLocalData();
                         this.renderPatients();
                         console.log('Dati caricati da Google Drive:', this.patients.length, 'pazienti');
@@ -742,7 +1013,7 @@ class PatientManager {
                     throw new Error('Errore nel download del file');
                 }
             } else {
-                console.log('Nessun file trovato su Google Drive per questo computer');
+                console.log('Nessun file condiviso trovato su Google Drive');
             }
             
         } catch (error) {
