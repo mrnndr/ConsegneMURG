@@ -217,11 +217,54 @@ header h1 {
     font-size: 0.8rem;
 }
 
+/* Pulsante Sposta */
 .btn-move {
-    background: linear-gradient(135deg, #ffc107, #e0a800);
-    color: #212529;
-    padding: 5px 10px;
-    font-size: 0.8rem;
+    background: linear-gradient(135deg, #17a2b8, #138496);
+    color: white;
+    border: none;
+    margin: 0 2px;
+}
+
+.btn-move:hover {
+    background: linear-gradient(135deg, #138496, #117a8b);
+    transform: translateY(-1px);
+}
+
+/* Stili per il modal di spostamento */
+.patient-info-display {
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 5px;
+    border-left: 4px solid #17a2b8;
+    margin-bottom: 15px;
+}
+
+.conflict-warning {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 5px;
+    padding: 15px;
+    margin: 15px 0;
+    border-left: 4px solid #f39c12;
+}
+
+.conflict-warning h4 {
+    color: #856404;
+    margin: 0 0 10px 0;
+}
+
+.conflict-warning p {
+    color: #856404;
+    margin: 10px 0 0 0;
+    font-weight: 500;
+}
+
+#conflictPatientInfo {
+    background: white;
+    padding: 10px;
+    border-radius: 3px;
+    margin: 10px 0;
+    border-left: 3px solid #e74c3c;
 }
 
 .btn-delete {
