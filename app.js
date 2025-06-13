@@ -170,6 +170,8 @@ class PatientManager {
         this.updateSyncIndicator('saving');
         
         const formData = new FormData(e.target);
+        const currentTime = new Date().toISOString();
+        
         const patientData = {
             id: this.currentPatient ? this.currentPatient.id : this.generateId(),
             name: formData.get('name') || '',
@@ -180,20 +182,23 @@ class PatientManager {
             pastHistory: formData.get('pastHistory') || '',
             management: formData.get('management') || '',
             notes: formData.get('notes') || '',
-            lastUpdated: new Date().toISOString(),
+            lastUpdated: currentTime,
             computerId: this.computerId
         };
 
         console.log('Salvando paziente:', patientData);
 
         if (this.currentPatient) {
-            // Modifica paziente esistente
+            // Modifica paziente esistente - PRESERVA la data di inserimento originale
             const index = this.patients.findIndex(p => p.id === this.currentPatient.id);
             if (index !== -1) {
+                // Mantieni la data di inserimento originale (admissionDate)
+                patientData.admissionDate = this.patients[index].admissionDate || this.patients[index].lastUpdated || currentTime;
                 this.patients[index] = patientData;
             }
         } else {
-            // Nuovo paziente
+            // Nuovo paziente - imposta la data di inserimento
+            patientData.admissionDate = currentTime;
             this.patients.push(patientData);
         }
 
@@ -401,6 +406,7 @@ class PatientManager {
         if (patientIndex !== -1) {
             this.patients[patientIndex].room = newRoom;
             this.patients[patientIndex].lastUpdated = new Date().toISOString();
+            // NON modificare admissionDate - rimane la data di inserimento originale
         }
         
         this.saveData();
@@ -420,12 +426,16 @@ class PatientManager {
         const patient2Index = this.patients.findIndex(p => p.id === conflictPatient.id);
         
         if (patient1Index !== -1 && patient2Index !== -1) {
+            const currentTime = new Date().toISOString();
+            
             // Scambia i letti
             this.patients[patient1Index].room = newRoom;
-            this.patients[patient1Index].lastUpdated = new Date().toISOString();
+            this.patients[patient1Index].lastUpdated = currentTime;
+            // NON modificare admissionDate
             
             this.patients[patient2Index].room = patient1OldRoom;
-            this.patients[patient2Index].lastUpdated = new Date().toISOString();
+            this.patients[patient2Index].lastUpdated = currentTime;
+            // NON modificare admissionDate
         }
         
         this.saveData();
