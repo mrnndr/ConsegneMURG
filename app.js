@@ -2,11 +2,14 @@ class PatientManager {
     constructor() {
         this.patients = [];
         this.currentPatient = null;
+        this.currentMovePatient = null;
         this.computerId = this.generateComputerId();
         this.isGoogleSignedIn = false;
         this.autoSyncEnabled = true;
         this.syncInterval = null;
         this.googleAPIReady = false;
+        this.accessToken = null;
+        this.tokenClient = null;
         
         this.init();
     }
@@ -410,33 +413,77 @@ class PatientManager {
         document.getElementById('lastUpdate').textContent = `Ultimo aggiornamento: ${timeString}`;
     }
 
-    // Google Drive Integration
+    // Google Drive Integration con nuovo Google Identity Services
     async initGoogleAPI() {
         try {
-            console.log('Inizializzazione Google API...');
+            console.log('Inizializzazione Google Identity Services...');
             
+            // Aspetta che gli script siano caricati
+            await this.waitForGoogleScripts();
+            
+            // Inizializza Google Identity Services
+            google.accounts.id.initialize({
+                client_id: '23098578039-fqcmp2bh03v5t4ufqlnhon6255s88h57.apps.googleusercontent.com',
+                callback: this.handleCredentialResponse.bind(this)
+            });
+            
+            // Inizializza il client OAuth2 per l'accesso alle API
+            this.tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: '23098578039-fqcmp2bh03v5t4ufqlnhon6255s88h57.apps.googleusercontent.com',
+                scope: 'https://www.googleapis.com/auth/drive',
+                callback: this.handleTokenResponse.bind(this)
+            });
+            
+            // Inizializza gapi per le chiamate API
             await new Promise((resolve) => {
-                gapi.load('auth2:client', resolve);
+                gapi.load('client', resolve);
             });
             
             await gapi.client.init({
                 apiKey: 'AIzaSyB9PjKTZzsJLQAX8FWSUl0uFr8EA7L9d1Q',
-                clientId: '23098578039-fqcmp2bh03v5t4ufqlnhon6255s88h57.apps.googleusercontent.com',
-                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-                scope: 'https://www.googleapis.com/auth/drive'
+                discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest']
             });
             
-            const authInstance = gapi.auth2.getAuthInstance();
-            this.isGoogleSignedIn = authInstance.isSignedIn.get();
             this.googleAPIReady = true;
             this.updateGoogleStatus();
             
-            console.log('Google API inizializzato correttamente');
+            console.log('Google Identity Services inizializzato correttamente');
             
         } catch (error) {
-            console.error('Errore nell\'inizializzazione di Google API:', error);
+            console.error('Errore nell\'inizializzazione di Google Identity Services:', error);
             this.googleAPIReady = false;
             this.updateGoogleStatus();
+        }
+    }
+    
+    async waitForGoogleScripts() {
+        return new Promise((resolve) => {
+            const checkGoogle = () => {
+                if (typeof google !== 'undefined' && typeof gapi !== 'undefined') {
+                    resolve();
+                } else {
+                    setTimeout(checkGoogle, 100);
+                }
+            };
+            checkGoogle();
+        });
+    }
+    
+    handleCredentialResponse(response) {
+        console.log('Credential response ricevuto:', response);
+        // Questo viene chiamato dopo il login con Google Identity
+    }
+    
+    handleTokenResponse(response) {
+        console.log('Token response ricevuto:', response);
+        if (response.access_token) {
+            this.accessToken = response.access_token;
+            gapi.client.setToken({ access_token: this.accessToken });
+            this.isGoogleSignedIn = true;
+            this.updateGoogleStatus();
+            this.loadFromGoogleDrive();
+        } else {
+            console.error('Errore nel token response:', response);
         }
     }
 
@@ -449,44 +496,26 @@ class PatientManager {
                 return;
             }
             
-            const authInstance = gapi.auth2.getAuthInstance();
-            
-            if (!authInstance) {
-                throw new Error('Google Auth instance non disponibile');
+            if (!this.tokenClient) {
+                throw new Error('Token client non inizializzato');
             }
             
-            // Configurazione opzioni di sign-in
-            const signInOptions = {
-                prompt: 'select_account'
-            };
-            
-            const user = await authInstance.signIn(signInOptions);
-            console.log('Login Google completato:', user.getBasicProfile().getName());
-            
-            this.isGoogleSignedIn = true;
-            this.updateGoogleStatus();
-            this.loadFromGoogleDrive();
+            // Richiedi il token di accesso
+            this.tokenClient.requestAccessToken({ prompt: 'consent' });
             
         } catch (error) {
             console.error('Errore nel login Google:', error);
-            
-            // Gestione errori specifici
-            if (error.error === 'popup_closed_by_user') {
-                alert('Login annullato. Riprova e completa l\'autenticazione nella finestra popup.');
-            } else if (error.error === 'popup_blocked_by_browser') {
-                alert('Popup bloccato dal browser. Abilita i popup per questo sito e riprova.');
-            } else if (error.error === 'access_denied') {
-                alert('Accesso negato. Autorizza l\'applicazione per continuare.');
-            } else {
-                alert('Errore durante il login Google: ' + (error.details || error.error || error.message));
-            }
+            alert('Errore durante il login Google: ' + (error.message || error));
         }
     }
 
     async signOutGoogle() {
         try {
-            const authInstance = gapi.auth2.getAuthInstance();
-            await authInstance.signOut();
+            if (this.accessToken) {
+                google.accounts.oauth2.revoke(this.accessToken);
+                this.accessToken = null;
+                gapi.client.setToken(null);
+            }
             this.isGoogleSignedIn = false;
             this.updateGoogleStatus();
             console.log('Logout Google completato');
@@ -519,7 +548,7 @@ class PatientManager {
     }
 
     async syncToGoogleDrive() {
-        if (!this.isGoogleSignedIn) return;
+        if (!this.isGoogleSignedIn || !this.accessToken) return;
         
         try {
             console.log('Inizio sincronizzazione con Google Drive...');
@@ -647,7 +676,7 @@ class PatientManager {
     }
 
     async loadFromGoogleDrive() {
-        if (!this.isGoogleSignedIn) return;
+        if (!this.isGoogleSignedIn || !this.accessToken) return;
         
         try {
             console.log('Caricamento dati da Google Drive...');
@@ -719,3 +748,12 @@ let patientManager;
 document.addEventListener('DOMContentLoaded', () => {
     patientManager = new PatientManager();
 });
+
+// Funzioni globali per compatibilità
+function openModal(patient = null) {
+    patientManager.openModal(patient);
+}
+
+function closeModal() {
+    patientManager.closeModal();
+}
