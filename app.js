@@ -757,3 +757,56 @@ function openModal(patient = null) {
 function closeModal() {
     patientManager.closeModal();
 }
+
+    sortByRoom() {
+        this.renderPatients(true);
+    }
+
+    renderPatients(sortByRoom = false) {
+        const container = document.getElementById('patientsContainer');
+        const filterPriority = document.getElementById('filterPriority').value;
+        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+
+        // Filtra pazienti
+        let filteredPatients = this.patients.filter(patient => {
+            const matchesSearch = !searchTerm || 
+                patient.name.toLowerCase().includes(searchTerm) ||
+                patient.room.toLowerCase().includes(searchTerm);
+            const matchesPriority = filterPriority === 'all' || patient.priority === filterPriority;
+            return matchesSearch && matchesPriority;
+        });
+
+        // Ordina pazienti per numero di letto se richiesto
+        if (sortByRoom) {
+            filteredPatients.sort((a, b) => {
+                const roomA = a.room || '';
+                const roomB = b.room || '';
+                
+                // Estrae i numeri dai nomi delle stanze per un ordinamento numerico intelligente
+                const getNumericValue = (room) => {
+                    const match = room.match(/\d+/);
+                    return match ? parseInt(match[0]) : 999999;
+                };
+                
+                const numA = getNumericValue(roomA);
+                const numB = getNumericValue(roomB);
+                
+                if (numA !== numB) {
+                    return numA - numB;
+                }
+                
+                // Se i numeri sono uguali, ordina alfabeticamente
+                return roomA.localeCompare(roomB);
+            });
+        }
+
+        // Renderizza pazienti
+        container.innerHTML = '';
+        filteredPatients.forEach(patient => {
+            const patientCard = this.createPatientCard(patient);
+            container.appendChild(patientCard);
+        });
+
+        // Aggiorna contatore
+        document.getElementById('patientCount').textContent = `Pazienti: ${filteredPatients.length}`;
+    }
