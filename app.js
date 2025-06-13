@@ -72,7 +72,6 @@ class PatientManager {
         });
         
         // Filtri e ricerca
-        document.getElementById('sortByRoomBtn').addEventListener('click', () => this.sortByRoom());
         document.getElementById('filterPriority').addEventListener('change', () => this.renderPatients());
         document.getElementById('searchInput').addEventListener('input', () => this.renderPatients());
         
@@ -234,11 +233,9 @@ class PatientManager {
         return Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5);
     }
 
-    sortByRoom() {
-        this.renderPatients(true);
-    }
 
-    renderPatients(sortByRoom = false) {
+
+    renderPatients(sortByRoom = true) {
         const container = document.getElementById('patientsContainer');
         const filterPriority = document.getElementById('filterPriority').value;
         const searchTerm = document.getElementById('searchInput').value.toLowerCase();
@@ -252,29 +249,27 @@ class PatientManager {
             return matchesSearch && matchesPriority;
         });
 
-        // Ordina pazienti per numero di letto se richiesto
-        if (sortByRoom) {
-            filteredPatients.sort((a, b) => {
-                const roomA = a.room || '';
-                const roomB = b.room || '';
-                
-                // Estrae i numeri dai nomi delle stanze per un ordinamento numerico intelligente
-                const getNumericValue = (room) => {
-                    const match = room.match(/\d+/);
-                    return match ? parseInt(match[0]) : 999999;
-                };
-                
-                const numA = getNumericValue(roomA);
-                const numB = getNumericValue(roomB);
-                
-                if (numA !== numB) {
-                    return numA - numB;
-                }
-                
-                // Se i numeri sono uguali, ordina alfabeticamente
-                return roomA.localeCompare(roomB);
-            });
-        }
+        // Ordina SEMPRE i pazienti per numero di letto
+        filteredPatients.sort((a, b) => {
+            const roomA = a.room || '';
+            const roomB = b.room || '';
+            
+            // Estrae i numeri dai nomi delle stanze per un ordinamento numerico intelligente
+            const getNumericValue = (room) => {
+                const match = room.match(/\d+/);
+                return match ? parseInt(match[0]) : 999999;
+            };
+            
+            const numA = getNumericValue(roomA);
+            const numB = getNumericValue(roomB);
+            
+            if (numA !== numB) {
+                return numA - numB;
+            }
+            
+            // Se i numeri sono uguali, ordina alfabeticamente
+            return roomA.localeCompare(roomB);
+        });
 
         // Renderizza pazienti
         container.innerHTML = '';
