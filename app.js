@@ -6,6 +6,7 @@ class PatientManager {
         this.isGoogleSignedIn = false;
         this.autoSyncEnabled = true;
         this.syncInterval = null;
+        this.googleAPIReady = false;
         
         this.init();
     }
@@ -40,6 +41,8 @@ class PatientManager {
         
         // Modal
         document.getElementById('closeModal').addEventListener('click', () => this.closeModal());
+        document.getElementById('patientForm').addEventListener('submit', (e) => this.savePatient(e));
+        
         // Modal spostamento
         document.getElementById('closeMoveModal').addEventListener('click', () => this.closeMoveModal());
         document.getElementById('cancelMoveBtn').addEventListener('click', () => this.closeMoveModal());
@@ -62,6 +65,11 @@ class PatientManager {
                 }
             }
         });
+        
+        // Filtri e ricerca
+        document.getElementById('sortBy').addEventListener('change', () => this.renderPatients());
+        document.getElementById('filterPriority').addEventListener('change', () => this.renderPatients());
+        document.getElementById('searchInput').addEventListener('input', () => this.renderPatients());
         
         // Chiusura modal cliccando fuori
         window.addEventListener('click', (e) => {
@@ -274,12 +282,122 @@ class PatientManager {
                 <p><strong>Priorità:</strong> <span class="priority-badge priority-${patient.priority}">${patient.priority}</span></p>
             </div>
             <div class="patient-actions">
-                <button onclick="patientManager.openModal(${JSON.stringify(patient).replace(/"/g, '&quot;')})", class="btn btn-edit">✏️ Modifica</button>
-                <button onclick="patientManager.openMoveModal('${patient.id}')", class="btn btn-move">🔄 Sposta</button>
-                <button onclick="patientManager.deletePatient('${patient.id}')", class="btn btn-delete">🗑️ Elimina</button>
+                <button onclick="patientManager.openModal(${JSON.stringify(patient).replace(/"/g, '&quot;')})" class="btn btn-edit">✏️ Modifica</button>
+                <button onclick="patientManager.openMoveModal('${patient.id}')" class="btn btn-move">🔄 Sposta</button>
+                <button onclick="patientManager.deletePatient('${patient.id}')" class="btn btn-delete">🗑️ Elimina</button>
             </div>
         `;
         return card;
+    }
+
+    // Funzioni per spostamento pazienti
+    openMoveModal(patientId) {
+        const patient = this.patients.find(p => p.id === patientId);
+        if (!patient) return;
+        
+        this.currentMovePatient = patient;
+        
+        // Popola i dati del paziente corrente
+        document.getElementById('currentPatientName').textContent = patient.name;
+        document.getElementById('currentPatientRoom').textContent = patient.room;
+        document.getElementById('newRoom').value = '';
+        
+        // Nasconde il warning di conflitto
+        document.getElementById('conflictWarning').style.display = 'none';
+        
+        // Mostra il modal
+        document.getElementById('moveModal').style.display = 'block';
+    }
+
+    closeMoveModal() {
+        document.getElementById('moveModal').style.display = 'none';
+        this.currentMovePatient = null;
+    }
+
+    checkRoomConflict(newRoom) {
+        return this.patients.find(p => 
+            p.room.toLowerCase() === newRoom.toLowerCase() && 
+            p.id !== this.currentMovePatient.id
+        );
+    }
+
+    showRoomConflict(conflictPatient, newRoom) {
+        const conflictWarning = document.getElementById('conflictWarning');
+        const conflictPatientName = document.getElementById('conflictPatientName');
+        const conflictPatientRoom = document.getElementById('conflictPatientRoom');
+        const submitBtn = document.querySelector('#moveForm button[type="submit"]');
+        
+        conflictPatientName.textContent = conflictPatient.name;
+        conflictPatientRoom.textContent = conflictPatient.room;
+        conflictWarning.style.display = 'block';
+        
+        // Cambia il pulsante per permettere lo scambio
+        submitBtn.innerHTML = '🔄 Scambia Pazienti';
+        submitBtn.onclick = (e) => {
+            e.preventDefault();
+            this.performSwap(newRoom, conflictPatient);
+        };
+    }
+
+    movePatient(e) {
+        e.preventDefault();
+        
+        const newRoom = document.getElementById('newRoom').value.trim();
+        if (!newRoom) {
+            alert('Inserisci il nuovo letto');
+            return;
+        }
+        
+        const conflict = this.checkRoomConflict(newRoom);
+        if (conflict) {
+            // Se c'è conflitto, il pulsante dovrebbe già essere configurato per lo scambio
+            return;
+        }
+        
+        this.performMove(newRoom);
+    }
+
+    performMove(newRoom) {
+        const oldRoom = this.currentMovePatient.room;
+        
+        // Aggiorna il letto del paziente
+        const patientIndex = this.patients.findIndex(p => p.id === this.currentMovePatient.id);
+        if (patientIndex !== -1) {
+            this.patients[patientIndex].room = newRoom;
+            this.patients[patientIndex].lastUpdated = new Date().toISOString();
+        }
+        
+        this.saveData();
+        this.renderPatients();
+        this.closeMoveModal();
+        this.updateLastUpdateTime();
+        
+        alert(`Paziente ${this.currentMovePatient.name} spostato da ${oldRoom} a ${newRoom}`);
+    }
+
+    performSwap(newRoom, conflictPatient) {
+        const patient1 = this.currentMovePatient;
+        const patient1OldRoom = patient1.room;
+        
+        // Trova gli indici dei pazienti
+        const patient1Index = this.patients.findIndex(p => p.id === patient1.id);
+        const patient2Index = this.patients.findIndex(p => p.id === conflictPatient.id);
+        
+        if (patient1Index !== -1 && patient2Index !== -1) {
+            // Scambia i letti
+            this.patients[patient1Index].room = newRoom;
+            this.patients[patient1Index].lastUpdated = new Date().toISOString();
+            
+            this.patients[patient2Index].room = patient1OldRoom;
+            this.patients[patient2Index].lastUpdated = new Date().toISOString();
+        }
+        
+        this.saveData();
+        this.renderPatients();
+        this.closeMoveModal();
+        this.updateLastUpdateTime();
+        
+        alert(`Pazienti scambiati:\n${patient1.name}: ${patient1OldRoom} → ${newRoom}\n${conflictPatient.name}: ${newRoom} → ${patient1OldRoom}`);
     }
 
     updateLastUpdateTime() {
@@ -295,6 +413,8 @@ class PatientManager {
     // Google Drive Integration
     async initGoogleAPI() {
         try {
+            console.log('Inizializzazione Google API...');
+            
             await new Promise((resolve) => {
                 gapi.load('auth2:client', resolve);
             });
@@ -303,27 +423,63 @@ class PatientManager {
                 apiKey: 'AIzaSyB9PjKTZzsJLQAX8FWSUl0uFr8EA7L9d1Q',
                 clientId: '23098578039-fqcmp2bh03v5t4ufqlnhon6255s88h57.apps.googleusercontent.com',
                 discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-                scope: 'https://www.googleapis.com/auth/drive' // ← Cambiato da 'drive.file' a 'drive'
+                scope: 'https://www.googleapis.com/auth/drive'
             });
             
             const authInstance = gapi.auth2.getAuthInstance();
             this.isGoogleSignedIn = authInstance.isSignedIn.get();
+            this.googleAPIReady = true;
             this.updateGoogleStatus();
+            
+            console.log('Google API inizializzato correttamente');
             
         } catch (error) {
             console.error('Errore nell\'inizializzazione di Google API:', error);
+            this.googleAPIReady = false;
+            this.updateGoogleStatus();
         }
     }
 
     async signInGoogle() {
         try {
+            console.log('Tentativo di login Google...');
+            
+            if (!this.googleAPIReady) {
+                alert('Google API non ancora pronto. Riprova tra qualche secondo.');
+                return;
+            }
+            
             const authInstance = gapi.auth2.getAuthInstance();
-            await authInstance.signIn();
+            
+            if (!authInstance) {
+                throw new Error('Google Auth instance non disponibile');
+            }
+            
+            // Configurazione opzioni di sign-in
+            const signInOptions = {
+                prompt: 'select_account'
+            };
+            
+            const user = await authInstance.signIn(signInOptions);
+            console.log('Login Google completato:', user.getBasicProfile().getName());
+            
             this.isGoogleSignedIn = true;
             this.updateGoogleStatus();
             this.loadFromGoogleDrive();
+            
         } catch (error) {
             console.error('Errore nel login Google:', error);
+            
+            // Gestione errori specifici
+            if (error.error === 'popup_closed_by_user') {
+                alert('Login annullato. Riprova e completa l\'autenticazione nella finestra popup.');
+            } else if (error.error === 'popup_blocked_by_browser') {
+                alert('Popup bloccato dal browser. Abilita i popup per questo sito e riprova.');
+            } else if (error.error === 'access_denied') {
+                alert('Accesso negato. Autorizza l\'applicazione per continuare.');
+            } else {
+                alert('Errore durante il login Google: ' + (error.details || error.error || error.message));
+            }
         }
     }
 
@@ -333,6 +489,7 @@ class PatientManager {
             await authInstance.signOut();
             this.isGoogleSignedIn = false;
             this.updateGoogleStatus();
+            console.log('Logout Google completato');
         } catch (error) {
             console.error('Errore nel logout Google:', error);
         }
@@ -343,7 +500,12 @@ class PatientManager {
         const signOutBtn = document.getElementById('googleSignOutBtn');
         const status = document.getElementById('googleStatus');
         
-        if (this.isGoogleSignedIn) {
+        if (!this.googleAPIReady) {
+            signInBtn.style.display = 'inline-flex';
+            signOutBtn.style.display = 'none';
+            status.textContent = '⏳ Inizializzazione Google API...';
+            status.className = 'sync-status inactive';
+        } else if (this.isGoogleSignedIn) {
             signInBtn.style.display = 'none';
             signOutBtn.style.display = 'inline-flex';
             status.textContent = '✅ Connesso a Google Drive';
@@ -536,11 +698,12 @@ class PatientManager {
             clearInterval(this.syncInterval);
         }
         
-        if (this.autoSyncEnabled && this.isGoogleSignedIn) {
-            this.syncInterval = setInterval(() => {
+        // Sincronizza ogni 30 secondi se connesso
+        this.syncInterval = setInterval(() => {
+            if (this.isGoogleSignedIn && this.autoSyncEnabled) {
                 this.syncToGoogleDrive();
-            }, 60000); // Sync ogni minuto
-        }
+            }
+        }, 30000);
     }
 
     stopAutoSync() {
@@ -549,145 +712,10 @@ class PatientManager {
             this.syncInterval = null;
         }
     }
-
-    openMoveModal(patientId) {
-        this.currentMovePatient = this.patients.find(p => p.id === patientId);
-        if (!this.currentMovePatient) return;
-        
-        const modal = document.getElementById('moveModal');
-        const form = document.getElementById('moveForm');
-        const patientInfo = document.getElementById('currentPatientInfo');
-        const conflictWarning = document.getElementById('conflictWarning');
-        
-        // Mostra info paziente corrente
-        patientInfo.innerHTML = `
-            <strong>${this.currentMovePatient.name}</strong><br>
-            Letto attuale: <strong>${this.currentMovePatient.room}</strong><br>
-            Età: ${this.currentMovePatient.age}
-        `;
-        
-        // Reset form
-        form.reset();
-        conflictWarning.style.display = 'none';
-        
-        modal.style.display = 'block';
-    }
-
-    closeMoveModal() {
-        document.getElementById('moveModal').style.display = 'none';
-        this.currentMovePatient = null;
-        this.conflictPatient = null;
-    }
-
-    checkRoomConflict(newRoom) {
-        return this.patients.find(p => 
-            p.room.toLowerCase() === newRoom.toLowerCase() && 
-            p.id !== this.currentMovePatient.id
-        );
-    }
-
-    movePatient(e) {
-        e.preventDefault();
-        
-        const formData = new FormData(e.target);
-        const newRoom = formData.get('newRoom').trim();
-        
-        if (!newRoom) {
-            alert('Inserisci il numero del nuovo letto');
-            return;
-        }
-        
-        // Controlla se il letto è già occupato
-        const conflictPatient = this.checkRoomConflict(newRoom);
-        
-        if (conflictPatient) {
-            this.showRoomConflict(conflictPatient, newRoom);
-        } else {
-            this.performMove(newRoom);
-        }
-    }
-
-    showRoomConflict(conflictPatient, newRoom) {
-        this.conflictPatient = conflictPatient;
-        const conflictWarning = document.getElementById('conflictWarning');
-        const conflictInfo = document.getElementById('conflictPatientInfo');
-        
-        conflictInfo.innerHTML = `
-            <strong>${conflictPatient.name}</strong> (Età: ${conflictPatient.age})<br>
-            attualmente nel letto <strong>${conflictPatient.room}</strong>
-        `;
-        
-        conflictWarning.style.display = 'block';
-        
-        // Cambia il testo del pulsante
-        const submitBtn = document.querySelector('#moveForm button[type="submit"]');
-        submitBtn.innerHTML = '🔄 Scambia Pazienti';
-        submitBtn.onclick = (e) => {
-            e.preventDefault();
-            this.performSwap(newRoom);
-        };
-    }
-
-    performMove(newRoom) {
-        const oldRoom = this.currentMovePatient.room;
-        
-        // Aggiorna il letto del paziente
-        const patientIndex = this.patients.findIndex(p => p.id === this.currentMovePatient.id);
-        if (patientIndex !== -1) {
-            this.patients[patientIndex].room = newRoom;
-            this.patients[patientIndex].lastUpdated = new Date().toISOString();
-            
-            this.saveData();
-            this.renderPatients();
-            this.closeMoveModal();
-            this.updateLastUpdateTime();
-            
-            alert(`✅ ${this.currentMovePatient.name} spostato dal letto ${oldRoom} al letto ${newRoom}`);
-        }
-    }
-
-    performSwap(newRoom) {
-        const patient1 = this.currentMovePatient;
-        const patient2 = this.conflictPatient;
-        const oldRoom1 = patient1.room;
-        const oldRoom2 = patient2.room;
-        
-        // Trova gli indici dei pazienti
-        const index1 = this.patients.findIndex(p => p.id === patient1.id);
-        const index2 = this.patients.findIndex(p => p.id === patient2.id);
-        
-        if (index1 !== -1 && index2 !== -1) {
-            // Scambia i letti
-            this.patients[index1].room = newRoom;
-            this.patients[index2].room = oldRoom1;
-            
-            // Aggiorna timestamp
-            const now = new Date().toISOString();
-            this.patients[index1].lastUpdated = now;
-            this.patients[index2].lastUpdated = now;
-            
-            this.saveData();
-            this.renderPatients();
-            this.closeMoveModal();
-            this.updateLastUpdateTime();
-            
-            alert(`✅ Scambio completato:\n${patient1.name}: ${oldRoom1} → ${newRoom}\n${patient2.name}: ${oldRoom2} → ${oldRoom1}`);
-        }
-    }
 }
 
-// Inizializza l'applicazione
+// Inizializza l'applicazione quando il DOM è pronto
 let patientManager;
-
 document.addEventListener('DOMContentLoaded', () => {
     patientManager = new PatientManager();
 });
-
-// Funzioni globali per compatibilità
-function openModal(patient = null) {
-    patientManager.openModal(patient);
-}
-
-function closeModal() {
-    patientManager.closeModal();
-}
